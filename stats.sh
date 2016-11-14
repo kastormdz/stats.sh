@@ -1,5 +1,6 @@
 #!/bin/bash
 PROC=$( cat /proc/cpuinfo | grep model| tail -n 1| cut -d : -f 2)
+CORES=$( cat /proc/cpuinfo | grep processor| wc -l)
 UPTIME=$(uptime|cut -d : -f 5| cut -d " " -f 2 | rev | cut -c 2- | rev)
 FECINS=$(ls --time-style=+%Y-%m-%d -lct /etc | tail -1 | awk '{print $6}')
 ANIO=$(echo $FECINS | cut -f1 -d -)
@@ -8,7 +9,7 @@ DIFF=$(expr $ACTUAL - $ANIO)
 echo "+------------------------------------------------------------------------------------------------------------------------------"
 echo "| HOSTNAME: $(hostname)  |          "
 echo "+------------------------------------------------------------------------------------------------------------------------------"
-echo "| PROCESADOR: $PROC  |  CARGA: $UPTIME  "
+echo "| PROCESADOR: $PROC  | CORES: $CORES | CARGA: $UPTIME  "
 echo "+------------------------------------------------------------------------------------------------------------------------------"
 echo "| INSTALACION SERVER: $FECINS  | $DIFF año(s) de Antiguedad                                             "
 echo "+------------------------------------------------------------------------------------------------------------------------------"
