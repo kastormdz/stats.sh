@@ -22,8 +22,8 @@ else
     echo "| DISCOS:  "
 fi
 echo "-------------------------------------------------------------------------------------------------------------------------------"
-df -h | grep -v tmpfs | grep -v none| grep -v udev | grep -v shm
-discos=$(df -h | grep -v tmpfs | grep -v none| grep -v udev| grep -v shm | awk '{print $5}' | tr -d '%' | grep -v U)
+df -h | grep -v tmpfs | grep -v none| grep -v udev | grep -v shm | grep -v loop
+discos=$(df -h | grep -v tmpfs | grep -v none| grep -v udev | grep -v shm | grep -v loop  | awk '{print $5}' | tr -d '%' | grep -v U)
 
 for a in $discos ; do
     if [ $a -gt 90 ] ; then
