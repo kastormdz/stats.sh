@@ -4,7 +4,7 @@
 #
 PROC=$( cat /proc/cpuinfo | grep model| tail -n 1| cut -d : -f 2)
 CORES=$(nproc)
-UPTIME=$(uptime|cut -d : -f 5| cut -d " " -f 2 | rev | cut -c 2- | rev)
+UPTIME=$(cat /proc/loadavg | awk '{print $1}')
 FECINS=$(ls --time-style=+%Y-%m-%d -lct /etc | tail -1 | awk '{print $6}')
 ANIO=$(echo $FECINS | cut -f1 -d -)
 ACTUAL=$(date +%Y)
