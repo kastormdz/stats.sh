@@ -13,32 +13,31 @@ PS=$(ps afx | wc -l)
 MEMTOTAL=$(free -m|grep Mem: | awk '{print $2}')
 MEMUSED=$(free -m|grep Mem: | awk '{print $3}')
 MEMFREE=$(free -m|grep Mem: | awk '{print $4}')
-echo "+-----------------------------------------------------------------------------------------------------------------------------+"
+VERSION=$(uname -s -i -v -o -r)
+echo "+------------------------------------------------------------------------------------------------------------------------------------------------+"
 echo "| Hostname: $(hostname)  |          "
-echo "+-----------------------------------------------------------------------------------------------------------------------------+"
-echo "| CPU: $PROC  | Cores: $CORES | Load: $UPTIME  "
-echo "| Instalacion Server: $FECINS  | $DIFF año(s) de Antiguedad                                             "
-echo "| Uptime: $(uptime)  "
-echo "| Cantidad de Procesos: $PS "
-echo "| MEMORIA Total: $MEMTOTAL Mb   Usada: $MEMUSED Mb   Libre: $MEMFREE Mb "
+echo "+------------------------------------------------------------------------------------------------------------------------------------------------+"
+echo "CPU: $PROC  |  Cores: $CORES |  Load: $UPTIME  "
+echo "$VERSION"
+echo "Instalacion Server: $FECINS  | $DIFF año(s) de Antiguedad                                             "
+echo "Uptime: $(uptime)  "
+echo "Cantidad de Procesos: $PS "
+echo "MEMORIA Total: $MEMTOTAL Mb   Usada: $MEMUSED Mb   Libre: $MEMFREE Mb "
 if [ -f /proc/drbd ] ; then
-echo -n "|  Estado DRBD: "
-echo "$(cat /proc/drbd | grep Primary | awk {'print $3  $4'} | sed 's/st://' | sed 's/ld:/  Estado: /')"
+   echo "Estado DRBD: "
+   cat /proc/drbd | grep Primary | awk {'print "Res " $1 " " $3  $4'} | sed 's/st://' | sed 's/ld:/  Estado: /'
 else
-    echo "| DISCOS:  "
+    echo "DISCOS:  "
 fi
-DF=$(df -Th | grep -v tmpfs | grep -v none| grep -v udev | grep -v shm | grep -v loop)
-for a in "${DF}" ; do
-	echo "| $a"
-done
+df -Th | grep -v tmpfs | grep -v none| grep -v udev | grep -v shm | grep -v loop
 discos=$(df -h | grep -v tmpfs | grep -v none| grep -v udev | grep -v shm | grep -v loop  | awk '{print $5}' | tr -d '%' | grep -v U)
 for a in $discos ; do
     if [ $a -gt 90 ] ; then
-       echo "|  *******************************************************************"
-       echo "|  ******************* W A R N I N G  $a % USADO *******************"
-       echo "|  *******************************************************************"
+       echo "  *******************************************************************"
+       echo "  ******************* W A R N I N G  $a % USADO *******************"
+       echo "  *******************************************************************"
     fi
 done
-echo "+-----------------------------------------------------------------------------------------------------------------------------+"
+echo "+------------------------------------------------------------------------------------------------------------------------------------------------+"
 echo " "
 echo " "
