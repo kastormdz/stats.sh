@@ -12,6 +12,14 @@ A lightweight system information script, similar to `fastfetch` or `neofetch`, d
 - **Resource Alerts:** Real-time warnings (outside the box) for high load, disk space usage, or excess processes.
 - **Legacy Compatibility:** Works on both modern systems and older versions (RedHat 5/6, etc.).
 
+## Requirements
+
+- `bash >= 3.2` and `awk` (any: gawk, mawk, busybox). Pure-POSIX awk, no extensions.
+- Everything else degrades gracefully if missing:
+  - listeners via `ss`, fallback to `netstat`;
+  - primary interface via `ip`, fallback to `ifconfig`;
+  - memory via `free`, fallback to `/proc/meminfo`.
+
 ## Usage
 Simply run the script:
 ```bash
@@ -20,8 +28,22 @@ Simply run the script:
 
 For Ansible/automation output (clean text):
 ```bash
-./stats.sh 1
+./stats.sh -a
 ```
+
+Machine-readable JSON (includes disks, services and versions):
+```bash
+./stats.sh -j
+```
+
+Fast mode (skips per-service versions and failed-services check):
+```bash
+./stats.sh --fast
+```
+
+All options: `-a/--ansible`, `-j/--json`, `-n/--no-color`,
+`-w/--width N` (40-200), `-v/--verbose`, `-f/--fast`, `-h/--help`.
+Legacy `./stats.sh 1` / `ansible` still works as `--ansible`.
 
 ## Authors
 - **Cristian Gimenez** (cgimenez@gmail.com)
