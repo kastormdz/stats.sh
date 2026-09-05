@@ -1,13 +1,11 @@
 #!/bin/bash
 #
 # stats.sh - Sistema de monitoreo ligero para servidores Linux
+# Versión: 2.1
 # Autor: Cristian Gimenez <cgimenez@gmail.com>
-#
-# Portabilidad: requiere bash >= 3.2, awk (gawk/mawk/nawk/busybox), coreutils.
-# Degrada elegante sin: ss|netstat, ip|ifconfig, systemctl, rpm/dpkg, free.
+# https://github.com/kastormdz/stats.sh
 #
 
-# Si se invocó con sh/dash (p.ej. "sh stats.sh"), re-ejecutar con bash.
 if [ -z "${BASH_VERSION:-}" ]; then
   if command -v bash >/dev/null 2>&1; then
     exec bash "$0" "$@"
@@ -17,11 +15,8 @@ if [ -z "${BASH_VERSION:-}" ]; then
   fi
 fi
 
-# Números siempre con punto decimal: en locales es_* algunos awk (mawk)
-# imprimen "11,6" y romperían JSON/barras. Solo afecta formato numérico.
 export LC_NUMERIC=C
 
-# --- CONFIGURACIÓN Y VALORES POR DEFECTO ---
 WIDTH=80
 ANSIBLE=0
 JSON=0
@@ -33,7 +28,6 @@ LIMITE_CONX=200
 
 log_debug() { [ "$VERBOSE" -eq 1 ] && echo "[DEBUG] $*" >&2; }
 
-# Colores (se inicializan solo si COLOR=1)
 init_colors() {
   if [ "$COLOR" -eq 1 ]; then
     VERDE='\033[0;32m'
@@ -47,10 +41,6 @@ init_colors() {
   fi
 }
 
-# Helper: eliminar secuencias ANSI para contar caracteres visibles (sin forks,
-# sin extglob: reemplazo literal de los únicos 6 códigos que emite init_colors).
-# NOTA: los colores viajan como texto literal '\033[..m' (los expande 'echo -e'
-# al imprimir), igual que antes con "printf '%b' | sed". Aquí '%b' es builtin.
 strip_ansi() {
   local s="$1" e code
   printf -v s '%b' "$s"
@@ -61,7 +51,6 @@ strip_ansi() {
   printf '%s' "$s"
 }
 
-# --- MANEJO DE ARGUMENTOS ---
 usage() {
   echo "Uso: $0 [OPCIONES]"
   echo "Opciones:"
@@ -116,13 +105,10 @@ done
 
 init_colors
 
-# --- FUNCIONES DE RECOLECCIÓN ---
-
 get_service_version() {
   local cmd="$1"
   local bin
 
-  # --- EXCEPCIÓN POSTFIX (proceso master) ---
   if [ "$cmd" = "master" ] || [ "$cmd" = "Postfix" ]; then
     if command -v postconf >/dev/null 2>&1; then
       local v
@@ -139,7 +125,6 @@ get_service_version() {
 
   local ver=""
 
-  # --- EXCEPCIÓN JAVA/TOMCAT ---
   if [ "$cmd" = "java" ] || [ "$cmd" = "Tomcat" ]; then
     if command -v tomcat >/dev/null 2>&1; then
       ver=$(tomcat version 2>/dev/null | grep "Server number" | cut -d: -f2 | xargs)
@@ -148,10 +133,8 @@ get_service_version() {
         return 0
       }
     fi
-    # Reusa cache global TOMCAT_HOME (seteada una vez en collect_data, evita ps por llamada)
     local t_home="${TOMCAT_HOME:-}"
     if [ -n "$t_home" ] && [ -d "$t_home" ]; then
-      # Reusa CATALINA_JAR si ya se resolvió (evita find por llamada en paralelo)
       local t_jar="${CATALINA_JAR:-$t_home/lib/catalina.jar}"
       if [ ! -f "$t_jar" ] && [ -z "${CATALINA_JAR:-}" ]; then
         t_jar=$(find "$t_home" -maxdepth 3 -name "catalina.jar" 2>/dev/null | head -n1)
@@ -166,10 +149,8 @@ get_service_version() {
     fi
   fi
 
-  # Fallback a gestores de paquetes si no es Tomcat/Postfix o si éstos fallaron
   [ -z "$bin" ] && return 1
 
-  # Intentar con gestores de paquetes primero
   if command -v dpkg-query >/dev/null 2>&1; then
     local pkg
     pkg=$(dpkg-query -S "$bin" 2>/dev/null | awk -F: '{print $1}' | head -n1)
@@ -177,16 +158,13 @@ get_service_version() {
       ver=$(dpkg-query -W -f='${Version}\n' "$pkg" 2>/dev/null)
     fi
   elif command -v rpm >/dev/null 2>&1; then
-    # rpm -qf devuelve error a stderr si no encuentra el paquete, lo silenciamos
     ver=$(rpm -qf --qf '%{VERSION}\n' "$bin" 2>/dev/null | head -n1)
   elif command -v pacman >/dev/null 2>&1; then
     ver=$(pacman -Qo "$bin" 2>/dev/null | awk '{print $NF}')
   fi
 
-  # Fallback a ejecución directa si el gestor falló o el archivo no pertenece a un paquete
   if [ -z "$ver" ] || [[ "$ver" == *"not owned"* ]] || [[ "$ver" == *"no package"* ]]; then
     if [ "$cmd" = "java" ]; then
-      # Java usa -version en lugar de -v
       ver=$("$bin" -version 2>&1 | head -n1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)
     else
       ver=$("$bin" -v 2>&1 || "$bin" --version 2>&1 || "$bin" -V 2>&1)
@@ -195,7 +173,6 @@ get_service_version() {
   fi
 
   if [ -n "$ver" ]; then
-    # Limpiamos epoch de Debian/Ubuntu (ej: "1:1.18.0" -> "1.18.0") sin fork
     if [[ "$ver" =~ ^[0-9]+:(.*) ]]; then ver="${BASH_REMATCH[1]}"; fi
     printf '%s\n' "$ver"
   else
@@ -246,11 +223,9 @@ collect_system_info() {
   UPTIME_H=$((UPTIME_S % 86400 / 3600))
   UPTIME_M=$((UPTIME_S % 3600 / 60))
   UPTIME="${UPTIME_D}d ${UPTIME_H}h ${UPTIME_M}m"
-  # uptime -s no existe en procps viejos: chequear salida, no el pipe
   LAST_REBOOT=$(uptime -s 2>/dev/null | cut -d: -f1,2)
   [ -z "$LAST_REBOOT" ] && LAST_REBOOT=$(who -b 2>/dev/null | awk '{print $3, $4}')
   LAST_REBOOT=$(printf '%s' "$LAST_REBOOT" | xargs 2>/dev/null || printf '%s' "$LAST_REBOOT")
-  # LC_ALL=C: en otros idiomas uptime dice "usuario/s" en vez de "user/s"
   USERS=$(LC_ALL=C uptime 2>/dev/null | grep -oE '[0-9]+ users?' | grep -oE '[0-9]+' | head -n1)
   [ -z "$USERS" ] && USERS=0
   INSTALADO=$(detect_install_date)
@@ -272,7 +247,6 @@ collect_system_info() {
 }
 
 collect_cpu_info() {
-  # Sin mapfile (requiere bash 4+; RHEL5 trae 3.2): un awk + split builtin
   local _cpu
   _cpu=$(awk '/model name[ \t]*:/ {sub(/.*: /,""); p=$0} p == "" && /^[Mm]odel[ \t]*:/ {sub(/.*: /,""); p=$0} /cpu MHz/ {sub(/.*: /,""); sub(/\..*/,""); m=$0} END {print p; print m}' /proc/cpuinfo 2>/dev/null)
   case "$_cpu" in
@@ -286,17 +260,13 @@ collect_cpu_info() {
   [ "$CORES" -lt 1 ] && CORES=1
   LOAD=$(awk '{print $1}' /proc/loadavg 2>/dev/null)
   [ -z "$LOAD" ] && LOAD=0
-  # Conteo de procesos sin forks (glob, no ls|wc)
   local _pids=(/proc/[0-9]*)
-  # ponytail: glob sin nullglob; si no matchea queda el patrón literal
   if [ "${#_pids[@]}" -eq 1 ] && [ ! -e "${_pids[0]}" ]; then PS_COUNT=0; else PS_COUNT=${#_pids[@]}; fi
 }
 
 collect_memory_info() {
   read -r MEMTOTAL MEMUSED MEMFREE <<<"$(free -m 2>/dev/null | grep Mem: | awk '{print $2, $3, $4}')"
   if [ -z "$MEMTOTAL" ] && [ -r /proc/meminfo ]; then
-    # Sin 'free' (containers mínimos): derivar de /proc/meminfo.
-    # MemAvailable no existe en kernels <3.14: aproximar Free+Buffers+Cached.
     read -r MEMTOTAL MEMFREE <<<"$(awk '/^MemTotal:/ {t=int($2/1024)} /^MemAvailable:/ {a=int($2/1024)} /^MemFree:/ {f=$2} /^Buffers:/ {b=$2} /^Cached:/ {c=$2} END {if (t != "") {if (a == "") a=int((f+b+c)/1024); print t, a}}' /proc/meminfo 2>/dev/null)"
     [ -n "$MEMTOTAL" ] && MEMUSED=$((MEMTOTAL - MEMFREE))
   fi
@@ -315,7 +285,6 @@ collect_network_info() {
   if command -v ip >/dev/null 2>&1; then
     read -r IFACE IP <<<"$(ip -4 addr show 2>/dev/null | awk '/inet / && !/127.0.0.1/ {print $NF, $2; exit}')"
   elif command -v ifconfig >/dev/null 2>&1; then
-    # net-tools: maquinas viejas o containers sin iproute2 ("inet addr:X" o "inet X")
     read -r IFACE IP <<<"$(ifconfig 2>/dev/null | awk '/^[^ ]/ {iface=$1; sub(/:$/, "", iface)} /inet / && $0 !~ /127\.0\.0\.1/ {for (i=1; i<=NF; i++) {ip=$i; sub(/^addr:/, "", ip); if (ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print iface, ip; exit}}}')"
   fi
   if [ -n "$IFACE" ]; then
@@ -325,7 +294,6 @@ collect_network_info() {
     RX_HUMAN=$(awk -v b="$RX_BYTES" "BEGIN { if (b>1024*1024*1024) printf \"%.2f GB\", b/1024/1024/1024; else printf \"%.2f MB\", b/1024/1024 }")
     TX_HUMAN=$(awk -v b="$TX_BYTES" "BEGIN { if (b>1024*1024*1024) printf \"%.2f GB\", b/1024/1024/1024; else printf \"%.2f MB\", b/1024/1024 }")
     if command -v ss >/dev/null 2>&1; then
-      # Contamos conexiones establecidas y en estados activos (SYN_SENT, FIN_WAIT, etc)
       CONEXIONES=$(ss -tun 2>/dev/null | awk 'NR>1 && $0 !~ /LISTEN/ {c++} END{print c+0}')
     elif command -v netstat >/dev/null 2>&1; then
       CONEXIONES=$(netstat -tun 2>/dev/null | awk 'NR>2 && $0 !~ /LISTEN/ {c++} END{print c+0}')
@@ -351,7 +319,6 @@ collect_data() {
 
   CPU_1=$(head -n1 /proc/stat)
   STATS_TMPDIR=$(mktemp -d 2>/dev/null || { mkdir -p "/tmp/stats.$$" && printf '%s' "/tmp/stats.$$"; })
-  # Limpieza sin output extra (el echo final solo va en modo visual, no en JSON/ansible)
   _stats_cleanup() {
     rm -rf "$STATS_TMPDIR" 2>/dev/null
     if [ "$JSON" -eq 0 ] && [ "$ANSIBLE" -eq 0 ]; then
@@ -360,8 +327,6 @@ collect_data() {
   }
   trap '_stats_cleanup' EXIT INT TERM
 
-  # Cachear detección de Tomcat una sola vez (ps+sed, sin cadena de greps).
-  # En modo fast se omite por completo.
   TOMCAT_HOME=""
   CATALINA_JAR=""
   if [ "$FAST" -eq 0 ]; then
@@ -374,14 +339,11 @@ collect_data() {
   fi
 
   {
-    # Listar listeners: ss preferido, netstat como fallback (viejas/minimales).
-    # Awk 100% POSIX (sin match() de 3 args ni length(array): mawk/busybox OK).
     if command -v ss >/dev/null 2>&1; then
       ss -plunt 2>/dev/null | awk '
         BEGIN { while ((getline < "/etc/services") > 0) { if (index($2, "/") > 0) { split($2, p, "/"); if (!(p[1] in svc_map)) svc_map[p[1]] = $1; } } }
         NR>1 {
             n=split($5, a, ":"); port=a[n];
-            # Nombre del proceso: users:(("nombre",pid=..,fd=..))
             name="unknown";
             if (index($0, "\"") > 0) { tmp=$0; sub(/^[^"]*"/, "", tmp); sub(/".*$/, "", tmp); if (tmp != "") name=tmp; }
             else if (port in svc_map) name=svc_map[port];
@@ -392,9 +354,6 @@ collect_data() {
             }
         } END { for (s in services) print s ":" services[s]; }' | sort -u >"$STATS_TMPDIR/services"
     elif command -v netstat >/dev/null 2>&1; then
-      # netstat: programa en $7 (tcp, con State) o $6 (udp). Forma "PID/nombre"
-      # pero netstat trunca con espacios ("77081/app.asar --no"): usar index/substr
-      # en vez de regex con '/' (100% POSIX, sin escapar barras).
       netstat -plunt 2>/dev/null | awk '
         BEGIN { while ((getline < "/etc/services") > 0) { if (index($2, "/") > 0) { split($2, p, "/"); if (!(p[1] in svc_map)) svc_map[p[1]] = $1; } } }
         NR>2 {
@@ -422,7 +381,6 @@ collect_data() {
     fi
 
     if [ "$FAST" -eq 1 ]; then
-      # Modo fast: sin versiones (evita dpkg/rpm/bin --version por servicio)
       grep -v '^unknown:' "$STATS_TMPDIR/services" >"$STATS_TMPDIR/services_new" 2>/dev/null || : >"$STATS_TMPDIR/services_new"
       : >"$STATS_TMPDIR/service_versions"
       mv "$STATS_TMPDIR/services_new" "$STATS_TMPDIR/services"
@@ -432,12 +390,10 @@ collect_data() {
       _svc_idx=0
       while IFS= read -r line; do
         [ -z "$line" ] && continue
-        # Sin forks: separar por primer ':'
         svc_name="${line%%:*}"
         svc_ports="${line#*:}"
         [ "$svc_name" = "unknown" ] && continue
 
-        # Renombrados antes del lookup para cachear por nombre final
         _final_name="$svc_name"
         if [ "$svc_name" = "java" ]; then
           if [ -n "$TOMCAT_HOME" ] || command -v tomcat >/dev/null 2>&1; then
@@ -449,7 +405,6 @@ collect_data() {
         fi
         printf '%s:%s\n' "$_final_name" "$svc_ports" >>"$STATS_TMPDIR/services_new"
 
-        # Lookup de versión en paralelo (un job por servicio, ~8 en total)
         _svc_idx=$((_svc_idx + 1))
         (
           svc_ver=$(get_service_version "$svc_name")
@@ -462,7 +417,6 @@ collect_data() {
     fi
   } &
   (df -P -h 2>/dev/null | awk 'NR>1 && $0 !~ /tmpfs|none|udev|shm|loop|efivarfs|overlay|nsfs/ {gsub(/%/,"",$5); print $6":"$5":"$2":"$4}' >"$STATS_TMPDIR/discos") &
-  # Un solo ps para top RAM y top CPU (antes: dos ps completos)
   (ps -eo comm,pcpu,pmem 2>/dev/null | tail -n +2 >"$STATS_TMPDIR/psraw";
    sort -k3 -nr "$STATS_TMPDIR/psraw" 2>/dev/null | awk 'NR<=3 {printf "%s%s", sep, $1; sep=", "}' >"$STATS_TMPDIR/ram";
    sort -k2 -nr "$STATS_TMPDIR/psraw" 2>/dev/null | awk 'NR<=3 {printf "%s%s", sep, $1; sep=", "}' >"$STATS_TMPDIR/cpu_top") &
@@ -494,7 +448,6 @@ collect_data() {
     FAILED_SERVICES_COUNT=0
   fi
 
-  # Cálculo final de CPU (Uso e I/O Wait)
   read -r CPU_USAGE_PERC IOWAIT_PERC <<<"$(printf "%s\n%s" "$CPU_1" "$CPU_2" | awk '{
       t=0; for(j=2;j<=NF;j++) t+=$j; u[NR]=t; idl[NR]=$5; wai[NR]=$6;
   } END {
@@ -511,15 +464,12 @@ collect_data() {
   }')"
 }
 
-# --- FUNCIONES VISUALES ---
-
 draw_line() {
   local text="$1"
   local target_visible=$((WIDTH - 4))
   local clean
   clean=$(strip_ansi "$text")
 
-  # Conteo sin forks: cada bloque/borde cuenta como 1 columna
   local count_str="${clean//█/X}"
   count_str="${count_str//░/X}"
   count_str="${count_str//─/X}"
@@ -538,7 +488,6 @@ draw_line() {
 
 draw_bar() {
   local percent=${1:-0}
-  # Asegurar que percent sea un número entero
   if ! [[ "$percent" =~ ^[0-9]+$ ]]; then
     percent=0
   fi
@@ -562,7 +511,6 @@ draw_bar() {
   printf "[%s%s%s] %3d%%" "${color}${bar_filled}" "${BLANCO}${bar_empty}" "${NC}" "$percent"
 }
 
-# Distro name/ver cacheado (lo usan dashboard y JSON)
 get_distro_ver() {
   [ -n "${DISTRO_NAME:-}" ] && return 0
   DISTRO_NAME=$(grep '^NAME=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
@@ -574,7 +522,6 @@ get_distro_ver() {
   [ -z "$DISTRO_VER" ] && DISTRO_VER="Rolling"
 }
 
-# Helper para padding basado en caracteres (no bytes), sin forks
 pad_label() {  local text="$1"
   local width="$2"
   local clean
@@ -645,7 +592,6 @@ render_dashboard() {
   while read -r s; do
     [ -z "$s" ] && continue
     IFS=: read -r name ports <<<"$s"
-    # Nombres de servicio son ASCII: ${#} evita fork de wc por servicio
     local name_vis_len=${#name}
     local padding_count=$((svc_name_col - name_vis_len))
     [ "$padding_count" -lt 0 ] && padding_count=0
@@ -687,7 +633,6 @@ render_dashboard() {
   local d_name="$DISTRO_NAME"
   local d_ver="$DISTRO_VER"
 
-  # Preparar lista de versiones (Distro + Servicios) - Usamos coma como único separador para el split
   local ver_output="$d_name:$d_ver"
   if [ -n "$SERVICE_VERSIONS" ]; then
     while read -r sv; do
@@ -695,18 +640,15 @@ render_dashboard() {
     done <<<"$SERVICE_VERSIONS"
   fi
 
-  # Renderizar versiones con wrapping
   local current_ver_line="  "
   local current_ver_vis=2
   IFS=',' read -ra V_ADDR <<<"$ver_output"
   for v_pair in "${V_ADDR[@]}"; do
     [ -z "$v_pair" ] && continue
-    # Usamos parameter expansion para separar por el primer ':'
     local v_name="${v_pair%%:*}"
     local v_val="${v_pair#*:}"
 
     local v_str="${VERDE}$v_name${NC}:${BLANCO}$v_val${NC}"
-    # Calculamos longitud visible (nombre + valor + separador ':')
     local v_len=$((${#v_name} + ${#v_val} + 1))
 
     if [ $((current_ver_vis + v_len + 2)) -gt $((WIDTH - 4)) ]; then
@@ -727,7 +669,6 @@ render_dashboard() {
 
   echo -e "└${H_LINE}┘"
 
-  # ALERTAS (solo en modo visual, fuera del recuadro)
   while read -r d; do
     [ -z "$d" ] && continue
     IFS=: read -r mount perc _rest <<<"$d"
@@ -783,7 +724,6 @@ output_json() {
   _rxe=$(json_num "$RX_ERRS"); _txe=$(json_num "$TX_ERRS"); _con=$(json_num "$CONEXIONES")
   _fail=$(json_num "$FAILED_SERVICES_COUNT"); _procs=$(json_num "$PS_COUNT"); _users=$(json_num "$USERS")
 
-  # Discos: [{mount, use_pct, total, free}]
   local _disks_json=""
   while IFS=: read -r _m _p _t _f; do
     [ -z "$_m" ] && continue
@@ -791,7 +731,6 @@ output_json() {
     _disks_json+="{\"mount\": \"$(json_escape "$_m")\", \"use_pct\": $(json_num "$_p"), \"total\": \"$(json_escape "$_t")\", \"free\": \"$(json_escape "$_f")\"}"
   done <<<"$DISCOS_DATA"
 
-  # Servicios: {"name": "ports"} + versiones {"name": "ver"}
   local _svc_json="" _ver_json=""
   while IFS=: read -r _n _pt; do
     [ -z "$_n" ] && continue
@@ -805,7 +744,6 @@ output_json() {
       _ver_json+="\"$(json_escape "$_n")\": \"$(json_escape "$_v")\""
     done <<<"$SERVICE_VERSIONS"
   fi
-  # Distro en versiones también
   if [ -n "$_ver_json" ]; then
     _ver_json="\"$(json_escape "$DISTRO_NAME")\": \"$(json_escape "$DISTRO_VER")\", $_ver_json"
   else
@@ -856,6 +794,5 @@ output_json() {
 EOF
 }
 
-# --- EJECUCIÓN ---
 collect_data
 if [ "$JSON" -eq 1 ]; then output_json; elif [ "$ANSIBLE" -eq 1 ]; then output_ansible; else render_dashboard; echo " "; fi
