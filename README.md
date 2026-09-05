@@ -2,6 +2,10 @@
 
 A lightweight system information script, similar to `fastfetch` or `neofetch`, designed for quick server diagnostics, no externals commands.
 
+<p align="center">
+  <img src="stats.png" alt="stats.sh dashboard screenshot" />
+</p>
+
 ## Features
 - **Visual Dashboard:** Clean, boxed layout with color-coded progress bars for CPU and RAM.
 - **Service Monitoring:** Lists unique listening services (TCP/UDP) with their ports, automatically grouped and filtered (excluding loopback/multicast).
