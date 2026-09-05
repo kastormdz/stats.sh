@@ -6,11 +6,100 @@
 # https://github.com/kastormdz/stats.sh
 #
 
+case "${LANG:-}" in
+  es*) IDIOMA=es ;;
+  *) IDIOMA=en ;;
+esac
+
+if [ "$IDIOMA" = es ]; then
+  L_ERR_BASH="Error: stats.sh requiere bash >= 3.2"
+  L_USAGE_HEAD="Uso:"
+  L_USAGE_OPTS="[OPCIONES]"
+  L_OPT_HEAD="Opciones:"
+  L_D_ANSIBLE="Modo compatible con Ansible (output simple)"
+  L_D_JSON="Salida en formato JSON"
+  L_D_NOCOLOR="Desactivar colores"
+  L_D_WIDTH="Ajustar ancho del recuadro (40-200, default: 80)"
+  L_D_VERBOSE="Mostrar información de depuración"
+  L_D_FAST="Modo rápido: omite versiones y chequeo de fallidos"
+  L_D_HELP="Mostrar esta ayuda"
+  L_ERR_WIDTH="Error: --width debe ser un número entre 40 y 200"
+  L_ERR_OPT="Opción desconocida:"
+  L_UNKNOWN_DATE="desconocida"
+  L_YSUF="a"
+  L_T_SISTEMA="SISTEMA"
+  L_T_ESTADO="ESTADO"
+  L_T_RED="RED"
+  L_T_ALMAC="ALMACENAMIENTO"
+  L_T_SERV="SERVICIOS"
+  L_T_VER="VERSIONES"
+  L_INST="Inst.:"
+  L_MHZ="Mhz"
+  L_CPU_USE="Uso CPU"
+  L_LOAD_PRE="Carga (Load "
+  L_MEM="Memoria RAM"
+  L_FREE="L:"
+  L_IOWAIT="I/O Wait (Disco)"
+  L_USERS="Usuarios Logueados:"
+  L_FAILED="Servicios Fallidos:"
+  L_IFACE="Placa:"
+  L_RX="Recibido:"
+  L_TX="Enviado:"
+  L_CONN="Conexiones:"
+  L_ERRORS="Errores:"
+  L_W_FS_MID="al"
+  L_W_FS_END="usado!"
+  L_W_PROC="Exceso de procesos:"
+  L_W_CONN="Exceso de conexiones:"
+  L_W_LIM="Límite:"
+else
+  L_ERR_BASH="Error: stats.sh requires bash >= 3.2"
+  L_USAGE_HEAD="Usage:"
+  L_USAGE_OPTS="[OPTIONS]"
+  L_OPT_HEAD="Options:"
+  L_D_ANSIBLE="Ansible-compatible mode (plain output)"
+  L_D_JSON="JSON output"
+  L_D_NOCOLOR="Disable colors"
+  L_D_WIDTH="Set box width (40-200, default: 80)"
+  L_D_VERBOSE="Show debug info"
+  L_D_FAST="Fast mode: skip versions and failed-services check"
+  L_D_HELP="Show this help"
+  L_ERR_WIDTH="Error: --width must be a number between 40 and 200"
+  L_ERR_OPT="Unknown option:"
+  L_UNKNOWN_DATE="unknown"
+  L_YSUF="y"
+  L_T_SISTEMA="SYSTEM"
+  L_T_ESTADO="STATUS"
+  L_T_RED="NETWORK"
+  L_T_ALMAC="STORAGE"
+  L_T_SERV="SERVICES"
+  L_T_VER="VERSIONS"
+  L_INST="Install:"
+  L_MHZ="MHz"
+  L_CPU_USE="CPU Usage"
+  L_LOAD_PRE="Load ("
+  L_MEM="Memory"
+  L_FREE="F:"
+  L_IOWAIT="I/O Wait (Disk)"
+  L_USERS="Logged Users:"
+  L_FAILED="Failed Services:"
+  L_IFACE="NIC:"
+  L_RX="Received:"
+  L_TX="Sent:"
+  L_CONN="Connections:"
+  L_ERRORS="Errors:"
+  L_W_FS_MID="at"
+  L_W_FS_END="used!"
+  L_W_PROC="Too many processes:"
+  L_W_CONN="Too many connections:"
+  L_W_LIM="Limit:"
+fi
+
 if [ -z "${BASH_VERSION:-}" ]; then
   if command -v bash >/dev/null 2>&1; then
     exec bash "$0" "$@"
   else
-    echo "Error: stats.sh requiere bash >= 3.2" >&2
+    echo "$L_ERR_BASH" >&2
     exit 1
   fi
 fi
@@ -52,15 +141,15 @@ strip_ansi() {
 }
 
 usage() {
-  echo "Uso: $0 [OPCIONES]"
-  echo "Opciones:"
-  echo "  -a, --ansible    Modo compatible con Ansible (output simple)"
-  echo "  -j, --json       Salida en formato JSON"
-  echo "  -n, --no-color   Desactivar colores"
-  echo "  -w, --width N    Ajustar ancho del recuadro (40-200, default: 80)"
-  echo "  -v, --verbose    Mostrar información de depuración"
-  echo "  -f, --fast       Modo rápido: omite versiones y chequeo de fallidos"
-  echo "  -h, --help       Mostrar esta ayuda"
+  echo "$L_USAGE_HEAD $0 $L_USAGE_OPTS"
+  echo "$L_OPT_HEAD"
+  echo "  -a, --ansible    $L_D_ANSIBLE"
+  echo "  -j, --json       $L_D_JSON"
+  echo "  -n, --no-color   $L_D_NOCOLOR"
+  echo "  -w, --width N    $L_D_WIDTH"
+  echo "  -v, --verbose    $L_D_VERBOSE"
+  echo "  -f, --fast       $L_D_FAST"
+  echo "  -h, --help       $L_D_HELP"
   exit 0
 }
 
@@ -91,13 +180,13 @@ while [[ "$#" -gt 0 ]]; do
       WIDTH="$2"
       shift 2
     else
-      echo "Error: --width debe ser un número entre 40 y 200" >&2
+      echo "$L_ERR_WIDTH" >&2
       exit 1
     fi
     ;;
   -h | --help) usage ;;
   *)
-    echo "Opción desconocida: $1"
+    echo "$L_ERR_OPT $1"
     usage
     ;;
   esac
@@ -230,17 +319,17 @@ collect_system_info() {
   [ -z "$USERS" ] && USERS=0
   INSTALADO=$(detect_install_date)
   FECINS=$(printf '%s' "$INSTALADO" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -n1)
-  [ -z "$FECINS" ] && FECINS="desconocida"
+  [ -z "$FECINS" ] && FECINS="$L_UNKNOWN_DATE"
   ACTUAL_DATE=$(date +%Y-%m-%d)
-  if [ "$FECINS" = "desconocida" ]; then
+  if [ "$FECINS" = "$L_UNKNOWN_DATE" ]; then
     ANTIGUEDAD="?"
   else
-    ANTIGUEDAD=$(awk -v d1="$FECINS" -v d2="$ACTUAL_DATE" 'BEGIN {
+    ANTIGUEDAD=$(awk -v d1="$FECINS" -v d2="$ACTUAL_DATE" -v ys="$L_YSUF" 'BEGIN {
         split(d1, a, "-"); split(d2, b, "-");
         y = b[1] - a[1]; m = b[2] - a[2];
         if (b[3] < a[3]) m--;
         if (m < 0) { y--; m += 12; }
-        if (y > 0) printf "%da", y;
+        if (y > 0) printf "%d%s", y, ys;
         else printf "%dm", m;
     }')
   fi
@@ -544,25 +633,25 @@ render_dashboard() {
   printf -v H_LINE '%*s' "$((WIDTH - 2))" ''
   H_LINE=${H_LINE// /─}
   echo -e "┌${H_LINE}┐"
-  draw_line "${BOLD}[SISTEMA]${NC}"
+  draw_line "${BOLD}[$L_T_SISTEMA]${NC}"
   draw_line "Hostname: ${VERDE}$HOSTNAME${NC}"
   draw_line "OS: ${AZUL}$OS${NC} ($VERSION)"
-  draw_line "Inst.: $FECINS ($ANTIGUEDAD) | Boot: ${AZUL}$LAST_REBOOT${NC}"
+  draw_line "$L_INST $FECINS ($ANTIGUEDAD) | Boot: ${AZUL}$LAST_REBOOT${NC}"
   draw_line "Uptime: ${AZUL}$UPTIME${NC}"
   echo -e "├${H_LINE}┤"
   draw_line "${BOLD}[HARDWARE]${NC}"
-  draw_line "CPU: $PROC @ $MHZ Mhz"
-  draw_line "$(pad_label "Uso CPU" 25) $(draw_bar ${CPU_USAGE_PERC%.*}) | Cores: ${AZUL}$CORES${NC}"
+  draw_line "CPU: $PROC @ $MHZ $L_MHZ"
+  draw_line "$(pad_label "$L_CPU_USE" 25) $(draw_bar ${CPU_USAGE_PERC%.*}) | Cores: ${AZUL}$CORES${NC}"
   local LOAD_PERC=$(awk -v l="$LOAD" -v c="$CORES" "BEGIN { p=(l*100)/c; if(p>100) p=100; print int(p) }")
-  draw_line "$(pad_label "Carga (Load $LOAD)" 25) $(draw_bar $LOAD_PERC) | Procs: ${AZUL}$PS_COUNT${NC}"
-  draw_line "$(pad_label "Memoria RAM" 25) $(draw_bar $MEM_PERC) | T: ${MEMTOTAL}Mb L: ${MEMFREE}Mb"
-  draw_line "$(pad_label "I/O Wait (Disco)" 25) $(draw_bar ${IOWAIT_PERC%.*})"
-  draw_line "Usuarios Logueados: ${AZUL}$USERS${NC}"
+  draw_line "$(pad_label "${L_LOAD_PRE}$LOAD)" 25) $(draw_bar $LOAD_PERC) | Procs: ${AZUL}$PS_COUNT${NC}"
+  draw_line "$(pad_label "$L_MEM" 25) $(draw_bar $MEM_PERC) | T: ${MEMTOTAL}Mb $L_FREE ${MEMFREE}Mb"
+  draw_line "$(pad_label "$L_IOWAIT" 25) $(draw_bar ${IOWAIT_PERC%.*})"
+  draw_line "$L_USERS ${AZUL}$USERS${NC}"
   echo -e "├${H_LINE}┤"
-  draw_line "${BOLD}[ESTADO]${NC}"
+  draw_line "${BOLD}[$L_T_ESTADO]${NC}"
   local S_COLOR=$VERDE
   [ "$FAILED_SERVICES_COUNT" -gt 0 ] && S_COLOR=$ROJO
-  draw_line "Servicios Fallidos: ${S_COLOR}$FAILED_SERVICES_COUNT${NC}"
+  draw_line "$L_FAILED ${S_COLOR}$FAILED_SERVICES_COUNT${NC}"
   if [ "$FAILED_SERVICES_COUNT" -gt 0 ]; then
     while read -r s; do [ -n "$s" ] && draw_line "  - ${ROJO}$s${NC}"; done <<<"$FAILED_SERVICES_LIST"
   fi
@@ -570,21 +659,21 @@ render_dashboard() {
   draw_line "Top CPU: ${AZUL}$TOP_CPU_LIST${NC}"
   if [ -n "$IFACE" ]; then
     echo -e "├${H_LINE}┤"
-    draw_line "${BOLD}[RED]${NC}"
-    draw_line "Placa: ${AZUL}$IFACE${NC} @ ${AZUL}$IP${NC}"
-    draw_line "Recibido: ${VERDE}$RX_HUMAN${NC} | Enviado: ${VERDE}$TX_HUMAN${NC}"
-    draw_line "Conexiones: ${AZUL}$CONEXIONES${NC} | Errores: ${ROJO}RX: $RX_ERRS / TX: $TX_ERRS${NC}"
+    draw_line "${BOLD}[$L_T_RED]${NC}"
+    draw_line "$L_IFACE ${AZUL}$IFACE${NC} @ ${AZUL}$IP${NC}"
+    draw_line "$L_RX ${VERDE}$RX_HUMAN${NC} | $L_TX ${VERDE}$TX_HUMAN${NC}"
+    draw_line "$L_CONN ${AZUL}$CONEXIONES${NC} | $L_ERRORS ${ROJO}RX: $RX_ERRS / TX: $TX_ERRS${NC}"
   fi
   echo -e "├${H_LINE}┤"
-  draw_line "${BOLD}[ALMACENAMIENTO]${NC}"
+  draw_line "${BOLD}[$L_T_ALMAC]${NC}"
   while read -r d; do
     [ -z "$d" ] && continue
     IFS=: read -r mount perc total free <<<"$d"
     if [ "${#mount}" -gt 25 ]; then mount="${mount:0:11}...${mount: -11}"; fi
-    draw_line "$(pad_label "$mount" 25) $(draw_bar "$perc") | T: ${total} L: ${free}"
+    draw_line "$(pad_label "$mount" 25) $(draw_bar "$perc") | T: ${total} $L_FREE ${free}"
   done <<<"$DISCOS_DATA"
   echo -e "├${H_LINE}┤"
-  draw_line "${BOLD}[SERVICIOS]${NC}"
+  draw_line "${BOLD}[$L_T_SERV]${NC}"
   local svc_indent=2
   local svc_name_col=22
   local svc_cont_pad
@@ -628,7 +717,7 @@ render_dashboard() {
   done <<<"$SERVICES"
 
   echo -e "├${H_LINE}┤"
-  draw_line "${BOLD}[VERSIONES]${NC}"
+  draw_line "${BOLD}[$L_T_VER]${NC}"
   get_distro_ver
   local d_name="$DISTRO_NAME"
   local d_ver="$DISTRO_VER"
@@ -673,14 +762,14 @@ render_dashboard() {
     [ -z "$d" ] && continue
     IFS=: read -r mount perc _rest <<<"$d"
     if [[ "$perc" =~ ^[0-9]+$ ]] && [ "$perc" -gt 90 ]; then
-      echo -e "  ${ROJO}${BOLD}WARNING:${NC} FS $mount al $perc% usado!"
+      echo -e "  ${ROJO}${BOLD}WARNING:${NC} FS $mount $L_W_FS_MID $perc% $L_W_FS_END"
     fi
   done <<<"$DISCOS_DATA"
   if [ -n "$LOAD" ] && awk -v v_load="$LOAD" -v cores="$CORES" 'BEGIN {exit !(v_load >= cores && v_load >= 1.0)}' 2>/dev/null; then
     echo -e "  ${ROJO}${BOLD}WARNING:${NC} High LOAD: $LOAD"
   fi
-  [ "$PS_COUNT" -gt "$LIMITE_PROC" ] && echo -e "  ${ROJO}${BOLD}WARNING:${NC} Exceso de procesos: $PS_COUNT (Límite: $LIMITE_PROC)"
-  [ "$CONEXIONES" -gt "$LIMITE_CONX" ] && echo -e "  ${ROJO}${BOLD}WARNING:${NC} Exceso de conexiones: $CONEXIONES (Límite: $LIMITE_CONX)"
+  [ "$PS_COUNT" -gt "$LIMITE_PROC" ] && echo -e "  ${ROJO}${BOLD}WARNING:${NC} $L_W_PROC $PS_COUNT ($L_W_LIM $LIMITE_PROC)"
+  [ "$CONEXIONES" -gt "$LIMITE_CONX" ] && echo -e "  ${ROJO}${BOLD}WARNING:${NC} $L_W_CONN $CONEXIONES ($L_W_LIM $LIMITE_CONX)"
 }
 
 output_ansible() {
