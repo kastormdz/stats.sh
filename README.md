@@ -20,6 +20,17 @@ A lightweight system information script, similar to `fastfetch` or `neofetch`, d
   - primary interface via `ip`, fallback to `ifconfig`;
   - memory via `free`, fallback to `/proc/meminfo`.
 
+## Quick run (no install)
+```bash
+curl -sSL https://raw.githubusercontent.com/kastormdz/stats.sh/master/stats.sh | bash
+```
+
+## Install
+```bash
+curl -sSL https://raw.githubusercontent.com/kastormdz/stats.sh/master/stats.sh -o /usr/local/bin/stats.sh
+chmod +x /usr/local/bin/stats.sh
+```
+
 ## Usage
 Simply run the script:
 ```bash
