@@ -556,23 +556,149 @@ collect_data() {
 draw_line() {
   local text="$1"
   local target_visible=$((WIDTH - 4))
-  local clean
-  clean=$(strip_ansi "$text")
-
-  local count_str="${clean//█/X}"
-  count_str="${count_str//░/X}"
-  count_str="${count_str//─/X}"
-  count_str="${count_str//│/X}"
-  local len=${#count_str}
-
-  local padding=$((target_visible - len))
-  if [ "$padding" -lt 0 ]; then
-    echo -e "│ $text │"
-  else
-    local spacer
-    printf -v spacer '%*s' "$padding" ''
-    echo -e "│ $text$spacer │"
-  fi
+  local cont_indent="  "
+  local first=1
+  local cur="$text"
+  local guard=0
+  while :; do
+    guard=$((guard + 1))
+    [ "$guard" -gt 20 ] && break
+    local avail=$target_visible
+    local prefix=""
+    if [ "$first" -eq 0 ]; then
+      prefix="$cont_indent"
+      avail=$((target_visible - 2))
+      [ "$avail" -lt 20 ] && avail=20
+    fi
+    local clean
+    clean=$(strip_ansi "$cur")
+    local count_str="${clean//█/X}"
+    count_str="${count_str//░/X}"
+    count_str="${count_str//─/X}"
+    count_str="${count_str//│/X}"
+    local len=${#count_str}
+    if [ "$len" -le "$avail" ]; then
+      local out="${prefix}${cur}"
+      local padding=$((target_visible - len - ${#prefix}))
+      [ "$padding" -lt 0 ] && padding=0
+      local spacer
+      printf -v spacer '%*s' "$padding" ''
+      echo -e "│ $out$spacer │"
+      break
+    fi
+    local raw_len=${#cur}
+    local i=0 vis=0
+    local last_space_raw=-1
+    local cut_raw=0
+    while [ "$i" -lt "$raw_len" ]; do
+      local rest="${cur:$i}"
+      case "$rest" in
+        $'\e['*)
+          local seq="${rest%%m*}"
+          if [ "$seq" != "$rest" ]; then
+            i=$((i + ${#seq} + 1))
+            continue
+          fi
+          ;;
+      esac
+      case "$rest" in
+        '\033['* | '\e['*)
+          local seq2="${rest%%m*}"
+          if [ "$seq2" != "$rest" ]; then
+            i=$((i + ${#seq2} + 1))
+            continue
+          fi
+          ;;
+      esac
+      local ch="${cur:$i:1}"
+      if [ "$ch" = " " ]; then
+        last_space_raw=$i
+      fi
+      vis=$((vis + 1))
+      i=$((i + 1))
+      if [ "$vis" -ge "$avail" ]; then
+        while [ "$i" -lt "$raw_len" ]; do
+          local r2="${cur:$i}"
+          case "$r2" in
+            $'\e['*)
+              local s2="${r2%%m*}"
+              [ "$s2" = "$r2" ] && break
+              i=$((i + ${#s2} + 1))
+              continue
+              ;;
+          esac
+          case "$r2" in
+            '\033['* | '\e['*)
+              local s3="${r2%%m*}"
+              [ "$s3" = "$r2" ] && break
+              i=$((i + ${#s3} + 1))
+              continue
+              ;;
+          esac
+          break
+        done
+        cut_raw=$i
+        break
+      fi
+    done
+    [ "$cut_raw" -eq 0 ] && cut_raw=$raw_len
+    local chunk rest_text
+    local use_space=0
+    if [ "$last_space_raw" -gt 0 ] && [ "$last_space_raw" -lt "$cut_raw" ]; then
+      local tail_seg="${cur:$((last_space_raw + 1)):$((cut_raw - last_space_raw - 1))}"
+      local tail_clean
+      tail_clean=$(strip_ansi "$tail_seg")
+      case "$tail_clean" in
+        *" "*)
+          use_space=1
+          ;;
+        *)
+          local word_seg="${cur:$((last_space_raw + 1))}"
+          local word_clean
+          word_clean=$(strip_ansi "$word_seg")
+          word_clean="${word_clean%% *}"
+          local cont_avail=$((target_visible - 2))
+          if [ "${#word_clean}" -le "$cont_avail" ]; then
+            use_space=1
+          else
+            use_space=0
+          fi
+          ;;
+      esac
+    fi
+    if [ "$use_space" -eq 1 ]; then
+      chunk="${cur:0:$last_space_raw}"
+      rest_text="${cur:$((last_space_raw + 1))}"
+    else
+      chunk="${cur:0:$cut_raw}"
+      rest_text="${cur:$cut_raw}"
+    fi
+    if [ -z "$chunk" ]; then
+      break
+    fi
+    local last_code=""
+    last_code=$(printf '%s' "$chunk" | grep -o '\\033\[[0-9;]*m\|\\e\[[0-9;]*m' 2>/dev/null | tail -n 1)
+    if [ -n "$last_code" ] && [ "$last_code" != '\033[0m' ] && [ "$last_code" != '\e[0m' ]; then
+      chunk="${chunk}${NC}"
+      rest_text="${last_code}${rest_text}"
+    fi
+    local clean_c
+    clean_c=$(strip_ansi "$chunk")
+    local cc="${clean_c//█/X}"
+    cc="${cc//░/X}"
+    cc="${cc//─/X}"
+    cc="${cc//│/X}"
+    local len_c=${#cc}
+    local out_c="${prefix}${chunk}"
+    local pad_c=$((target_visible - len_c - ${#prefix}))
+    [ "$pad_c" -lt 0 ] && pad_c=0
+    local sp_c
+    printf -v sp_c '%*s' "$pad_c" ''
+    echo -e "│ $out_c$sp_c │"
+    cur="$rest_text"
+    first=0
+    [ -z "$cur" ] && break
+  done
 }
 
 draw_bar() {
