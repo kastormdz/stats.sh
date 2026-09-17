@@ -1,0 +1,11 @@
+AGENT.md
+AGENTS.md
+GEMINI.md
+.agent/
+.agents/
+.opencode/
+graphify-out/
+
+# Copias de conflicto de clientes de sync (Seafile / Syncthing)
+*SFConflict*
+*.sync-conflict-*

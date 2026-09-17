@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # stats.sh - Sistema de monitoreo ligero para servidores Linux
-# Versión: 2.1
+# Versión: 2.2
 # Autor: Cristian Gimenez <cgimenez@gmail.com>
 # https://github.com/kastormdz/stats.sh
 #
@@ -38,7 +38,8 @@ if [ "$IDIOMA" = es ]; then
   L_CPU_USE="Uso CPU"
   L_LOAD_PRE="Carga (Load "
   L_MEM="Memoria RAM"
-  L_FREE="L:"
+  L_FREE="Disp:"
+  L_MORE="más"
   L_IOWAIT="I/O Wait (Disco)"
   L_USERS="Usuarios Logueados:"
   L_FAILED="Servicios Fallidos:"
@@ -79,7 +80,8 @@ else
   L_CPU_USE="CPU Usage"
   L_LOAD_PRE="Load ("
   L_MEM="Memory"
-  L_FREE="F:"
+  L_FREE="Avail:"
+  L_MORE="more"
   L_IOWAIT="I/O Wait (Disk)"
   L_USERS="Logged Users:"
   L_FAILED="Failed Services:"
@@ -112,8 +114,12 @@ JSON=0
 COLOR=1
 VERBOSE=0
 FAST=0
-LIMITE_PROC=300
-LIMITE_CONX=200
+LIMITE_PROC=${STATS_MAX_PROC:-300}
+LIMITE_CONX=${STATS_MAX_CONN:-200}
+MAX_SVC_PORTS=${STATS_MAX_SVC_PORTS:-12}
+case "$LIMITE_PROC" in ''|*[!0-9]*) LIMITE_PROC=300;; esac
+case "$LIMITE_CONX" in ''|*[!0-9]*) LIMITE_CONX=200;; esac
+case "$MAX_SVC_PORTS" in ''|*[!0-9]*) MAX_SVC_PORTS=12;; esac
 
 log_debug() { [ "$VERBOSE" -eq 1 ] && echo "[DEBUG] $*" >&2; }
 
@@ -150,7 +156,7 @@ usage() {
   echo "  -v, --verbose    $L_D_VERBOSE"
   echo "  -f, --fast       $L_D_FAST"
   echo "  -h, --help       $L_D_HELP"
-  exit 0
+  exit "${1:-0}"
 }
 
 while [[ "$#" -gt 0 ]]; do
@@ -186,8 +192,8 @@ while [[ "$#" -gt 0 ]]; do
     ;;
   -h | --help) usage ;;
   *)
-    echo "$L_ERR_OPT $1"
-    usage
+    echo "$L_ERR_OPT $1" >&2
+    usage 1
     ;;
   esac
 done
@@ -315,6 +321,7 @@ collect_system_info() {
   LAST_REBOOT=$(uptime -s 2>/dev/null | cut -d: -f1,2)
   [ -z "$LAST_REBOOT" ] && LAST_REBOOT=$(who -b 2>/dev/null | awk '{print $3, $4}')
   LAST_REBOOT=$(printf '%s' "$LAST_REBOOT" | xargs 2>/dev/null || printf '%s' "$LAST_REBOOT")
+  [ -z "$LAST_REBOOT" ] && LAST_REBOOT="$L_UNKNOWN_DATE"
   USERS=$(LC_ALL=C uptime 2>/dev/null | grep -oE '[0-9]+ users?' | grep -oE '[0-9]+' | head -n1)
   [ -z "$USERS" ] && USERS=0
   INSTALADO=$(detect_install_date)
@@ -354,14 +361,28 @@ collect_cpu_info() {
 }
 
 collect_memory_info() {
-  read -r MEMTOTAL MEMUSED MEMFREE <<<"$(free -m 2>/dev/null | grep Mem: | awk '{print $2, $3, $4}')"
-  if [ -z "$MEMTOTAL" ] && [ -r /proc/meminfo ]; then
-    read -r MEMTOTAL MEMFREE <<<"$(awk '/^MemTotal:/ {t=int($2/1024)} /^MemAvailable:/ {a=int($2/1024)} /^MemFree:/ {f=$2} /^Buffers:/ {b=$2} /^Cached:/ {c=$2} END {if (t != "") {if (a == "") a=int((f+b+c)/1024); print t, a}}' /proc/meminfo 2>/dev/null)"
-    [ -n "$MEMTOTAL" ] && MEMUSED=$((MEMTOTAL - MEMFREE))
+  MEMTOTAL="" MEMUSED="" MEMFREE="" MEMFREE_RAW=""
+  # Primario: /proc/meminfo (MemAvailable desde Linux 3.14). MEMFREE = disponible real,
+  # MEMFREE_RAW = libre crudo. Usar el "libre" de free como disponible miente con cache alto.
+  if [ -r /proc/meminfo ]; then
+    read -r MEMTOTAL MEMUSED MEMFREE MEMFREE_RAW <<<"$(awk '
+      /^MemTotal:/ {t=int($2/1024)}
+      /^MemAvailable:/ {a=int($2/1024)}
+      /^MemFree:/ {f=int($2/1024)}
+      /^Buffers:/ {b=$2}
+      /^Cached:/ {c=$2}
+      END {
+        if (a == "") a = int((f*1024 + b + c)/1024)
+        if (t != "") printf "%d %d %d %d", t, t - a, a, f
+      }' /proc/meminfo 2>/dev/null)"
+  fi
+  if [ -z "$MEMTOTAL" ]; then
+    read -r MEMTOTAL MEMUSED MEMFREE MEMFREE_RAW <<<"$(free -m 2>/dev/null | grep Mem: | awk '{print $2, $3, $4, $4}')"
   fi
   case "$MEMTOTAL" in ''|*[!0-9]*) MEMTOTAL=0;; esac
   case "$MEMUSED" in ''|*[!0-9]*) MEMUSED=0;; esac
   case "$MEMFREE" in ''|*[!0-9]*) MEMFREE=0;; esac
+  case "$MEMFREE_RAW" in ''|*[!0-9]*) MEMFREE_RAW=$MEMFREE;; esac
   if [ "$MEMTOTAL" -gt 0 ] 2>/dev/null; then
     MEM_PERC=$((MEMUSED * 100 / MEMTOTAL))
   else
@@ -369,19 +390,86 @@ collect_memory_info() {
   fi
 }
 
+human_bytes() {
+  awk -v b="${1:-0}" 'BEGIN {
+    if (b >= 1099511627776) printf "%.2f TiB", b / 1099511627776;
+    else if (b >= 1073741824) printf "%.2f GiB", b / 1073741824;
+    else if (b >= 1048576) printf "%.2f MiB", b / 1048576;
+    else if (b >= 1024) printf "%.2f KiB", b / 1024;
+    else printf "%d B", b;
+  }'
+}
+
 collect_network_info() {
   IFACE=""; IP=""
+  # 1) ip (iproute2): presente en practicamente todo Linux moderno
   if command -v ip >/dev/null 2>&1; then
     read -r IFACE IP <<<"$(ip -4 addr show 2>/dev/null | awk '/inet / && !/127.0.0.1/ {print $NF, $2; exit}')"
-  elif command -v ifconfig >/dev/null 2>&1; then
+  fi
+  # 2) ifconfig (net-tools): opcional y cada vez mas raro, solo si 'ip' no dio resultado
+  if [ -z "$IFACE" ] && command -v ifconfig >/dev/null 2>&1; then
     read -r IFACE IP <<<"$(ifconfig 2>/dev/null | awk '/^[^ ]/ {iface=$1; sub(/:$/, "", iface)} /inet / && $0 !~ /127\.0\.0\.1/ {for (i=1; i<=NF; i++) {ip=$i; sub(/^addr:/, "", ip); if (ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print iface, ip; exit}}}')"
+  fi
+  # 3) Sin binarios externos: interfaz desde /proc/net/route (ruta default) + IP desde
+  #    /proc/net/fib_trie validada contra la subred de ESA interfaz (evita devolver una
+  #    IP de Tailscale/VPN o de un bridge de Docker, que tambien son locales).
+  if [ -z "$IFACE" ] && [ -r /proc/net/route ]; then
+    read -r IFACE IP <<<"$(awk '
+      function lehex(ip,   a, n) {
+        n = split(ip, a, ".")
+        if (n != 4) return ""
+        return sprintf("%02X%02X%02X%02X", a[4], a[3], a[2], a[1])
+      }
+      function fbits(mask,   i, c, k) {
+        k = 0
+        for (i = length(mask); i >= 1; i--) {
+          c = substr(mask, i, 1)
+          if (c == "F" || c == "f") k++
+          else break
+        }
+        return k
+      }
+      FNR == NR {
+        if (FNR == 1) next
+        nroute++
+        r_if[nroute] = $1
+        r_dest[nroute] = $2
+        r_mask[nroute] = $8
+        if ($2 == "00000000" && def == "") def = $1
+        next
+      }
+      /^[[:space:]]*[|]-- / { cand = $2 }
+      /\/32 host LOCAL/ {
+        if (cand ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && cand !~ /^127\./ && cand != "0.0.0.0") {
+          ncand++
+          cands[ncand] = cand
+        }
+        cand = ""
+      }
+      END {
+        if (def == "") exit
+        for (c = 1; c <= ncand; c++) {
+          cl = lehex(cands[c])
+          if (cl == "") continue
+          for (r = 1; r <= nroute; r++) {
+            if (r_if[r] != def || r_dest[r] == "00000000" || r_mask[r] == "00000000") continue
+            k = fbits(r_mask[r])
+            if (k <= 0) continue
+            if (substr(cl, length(cl) - k + 1) == substr(r_dest[r], length(r_dest[r]) - k + 1)) {
+              print def, cands[c] "/" (k * 4)
+              exit
+            }
+          }
+        }
+        print def
+      }' /proc/net/route /proc/net/fib_trie 2>/dev/null)"
   fi
   if [ -n "$IFACE" ]; then
     IFACE_CLEAN=${IFACE//:/}
     read -r RX_BYTES TX_BYTES RX_ERRS TX_ERRS <<< \
       "$(awk -v iface="$IFACE_CLEAN" '$1 == iface":" {gsub(/:/," "); print $2, $10, $4, $12}' /proc/net/dev 2>/dev/null)"
-    RX_HUMAN=$(awk -v b="$RX_BYTES" "BEGIN { if (b>1024*1024*1024) printf \"%.2f GB\", b/1024/1024/1024; else printf \"%.2f MB\", b/1024/1024 }")
-    TX_HUMAN=$(awk -v b="$TX_BYTES" "BEGIN { if (b>1024*1024*1024) printf \"%.2f GB\", b/1024/1024/1024; else printf \"%.2f MB\", b/1024/1024 }")
+    RX_HUMAN=$(human_bytes "$RX_BYTES")
+    TX_HUMAN=$(human_bytes "$TX_BYTES")
     if command -v ss >/dev/null 2>&1; then
       CONEXIONES=$(ss -tun 2>/dev/null | awk 'NR>1 && $0 !~ /LISTEN/ {c++} END{print c+0}')
     elif command -v netstat >/dev/null 2>&1; then
@@ -497,7 +585,9 @@ collect_data() {
         _svc_idx=$((_svc_idx + 1))
         (
           svc_ver=$(get_service_version "$svc_name")
-          [ -n "$svc_ver" ] && printf '%s:%s\n' "$_final_name" "$svc_ver" >"$STATS_TMPDIR/sv.$_svc_idx"
+          if [ -n "$svc_ver" ] && [ "$svc_ver" != "N/A" ]; then
+            printf '%s:%s\n' "$_final_name" "$svc_ver" >"$STATS_TMPDIR/sv.$_svc_idx"
+          fi
         ) &
       done <"$STATS_TMPDIR/services"
       wait
@@ -786,7 +876,11 @@ render_dashboard() {
   if [ -n "$IFACE" ]; then
     echo -e "├${H_LINE}┤"
     draw_line "${BOLD}[$L_T_RED]${NC}"
-    draw_line "$L_IFACE ${AZUL}$IFACE${NC} @ ${AZUL}$IP${NC}"
+    if [ -n "$IP" ]; then
+      draw_line "$L_IFACE ${AZUL}$IFACE${NC} @ ${AZUL}$IP${NC}"
+    else
+      draw_line "$L_IFACE ${AZUL}$IFACE${NC}"
+    fi
     draw_line "$L_RX ${VERDE}$RX_HUMAN${NC} | $L_TX ${VERDE}$TX_HUMAN${NC}"
     draw_line "$L_CONN ${AZUL}$CONEXIONES${NC} | $L_ERRORS ${ROJO}RX: $RX_ERRS / TX: $TX_ERRS${NC}"
   fi
@@ -809,18 +903,31 @@ render_dashboard() {
     IFS=: read -r name ports <<<"$s"
     local name_vis_len=${#name}
     local padding_count=$((svc_name_col - name_vis_len))
-    [ "$padding_count" -lt 0 ] && padding_count=0
+    # nombre mas largo que la columna: al menos 1 espacio, nunca pegar nombre y puertos
+    [ "$padding_count" -lt 1 ] && padding_count=1
     local name_colored="${VERDE}$name${NC}"
     local padding_spaces
     printf -v padding_spaces '%*s' "$padding_count" ''
     local prefix="  $name_colored$padding_spaces"
-    local prefix_vis=$((svc_indent + svc_name_col))
+    local prefix_vis=$((svc_indent + name_vis_len))
+    [ "$name_vis_len" -lt "$svc_name_col" ] && prefix_vis=$((svc_indent + svc_name_col))
 
     local current_line="$prefix"
     local current_vis=$prefix_vis
     IFS=',' read -ra ADDR <<<"$ports"
-    for port in "${ADDR[@]}"; do
-      local port_trimmed="${port// /}"
+    local addr_total=${#ADDR[@]}
+    local ports_display=()
+    local _pi=0
+    while [ "$_pi" -lt "$addr_total" ] && [ "$_pi" -lt "$MAX_SVC_PORTS" ]; do
+      ports_display+=("${ADDR[$_pi]}")
+      _pi=$((_pi + 1))
+    done
+    if [ "$addr_total" -gt "$MAX_SVC_PORTS" ]; then
+      ports_display+=("+$((addr_total - MAX_SVC_PORTS)) $L_MORE")
+    fi
+    for port in "${ports_display[@]}"; do
+      local port_trimmed="${port#"${port%%[![:space:]]*}"}"
+      port_trimmed="${port_trimmed%"${port_trimmed##*[![:space:]]}"}"
       local add_len
       if [[ "$current_line" == "$prefix" ]] || [[ "$current_line" =~ ^[[:space:]]+$ ]]; then
         add_len=${#port_trimmed}
@@ -910,7 +1017,8 @@ output_ansible() {
   echo "IOWAIT: ${IOWAIT_PERC:-0}%"
   echo "MEM_USAGE: ${MEM_PERC:-0}%"
   echo "MEM_TOTAL_MB: ${MEMTOTAL:-0}"
-  echo "MEM_FREE_MB: ${MEMFREE:-0}"
+  echo "MEM_FREE_MB: ${MEMFREE_RAW:-0}"
+  echo "MEM_AVAILABLE_MB: ${MEMFREE:-0}"
   echo "FAILED_SERVICES: ${FAILED_SERVICES_COUNT:-0}"
   echo "CONNECTIONS: ${CONEXIONES:-0}"
   echo "RX_ERRORS: ${RX_ERRS:-0}"
@@ -932,8 +1040,9 @@ output_json() {
   local _mhz _cores _usage _iowait _load
   _mhz=$(json_num "$MHZ"); _cores=$(json_num "$CORES")
   _usage=$(json_num "$CPU_USAGE_PERC"); _iowait=$(json_num "$IOWAIT_PERC"); _load=$(json_num "$LOAD")
-  local _mt _mu _mf _mp
+  local _mt _mu _mf _mp _mfr
   _mt=$(json_num "$MEMTOTAL"); _mu=$(json_num "$MEMUSED"); _mf=$(json_num "$MEMFREE"); _mp=$(json_num "$MEM_PERC")
+  _mfr=$(json_num "$MEMFREE_RAW")
   local _rxb _txb _rxe _txe _con _fail _procs _users
   _rxb=$(json_num "$RX_BYTES"); _txb=$(json_num "$TX_BYTES")
   _rxe=$(json_num "$RX_ERRS"); _txe=$(json_num "$TX_ERRS"); _con=$(json_num "$CONEXIONES")
@@ -985,7 +1094,8 @@ output_json() {
   "memory": {
     "total_mb": $_mt,
     "used_mb": $_mu,
-    "free_mb": $_mf,
+    "free_mb": $_mfr,
+    "available_mb": $_mf,
     "usage_pct": $_mp
   },
   "network": {
