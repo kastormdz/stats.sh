@@ -146,6 +146,70 @@ strip_ansi() {
   printf '%s' "$s"
 }
 
+# --- Ancho visible y limites de caracter ---------------------------------------
+# bash cuenta BYTES cuando el locale activo no es UTF-8 (LANG=C en un server, o un
+# *.UTF-8 que no esta generado en el sistema: glibc cae a C). Eso rompe dos cosas:
+# la medicion del ancho (los bloques █░ pesan 3 bytes) y el corte del wrap, que
+# parte un caracter al medio y deja bytes invalidos en la salida. Se detecta el modo
+# real (no el nombre del locale) y se compensa.
+_mb_probe='█'
+if [ "${#_mb_probe}" -eq 3 ]; then BYTE_MODE=1; else BYTE_MODE=0; fi
+CONT_BYTES=""
+if [ "$BYTE_MODE" -eq 1 ]; then
+  _i=128
+  while [ "$_i" -le 191 ]; do
+    CONT_BYTES="$CONT_BYTES$(printf '%b' "\\$(printf '%03o' "$_i")")"
+    _i=$((_i + 1))
+  done
+fi
+
+# Longitud VISIBLE (caracteres, no bytes) de $1, sin color y con los bloques contados
+# como uno. En modo bytes se descuentan los bytes de continuacion UTF-8.
+vis_len() {
+  local s i len j n=0 cb
+  s=$(strip_ansi "$1")
+  s="${s//█/X}"
+  s="${s//░/X}"
+  s="${s//─/X}"
+  s="${s//│/X}"
+  if [ "$BYTE_MODE" -eq 0 ]; then
+    printf '%d' "${#s}"
+    return
+  fi
+  len=${#s}
+  i=0
+  while [ "$i" -lt "$len" ]; do
+    j=$((i + 1))
+    while [ "$j" -lt "$len" ]; do
+      cb="${s:$j:1}"
+      case "$CONT_BYTES" in
+      *"$cb"*) j=$((j + 1)) ;;
+      *) break ;;
+      esac
+    done
+    i=$j
+    n=$((n + 1))
+  done
+  printf '%d' "$n"
+}
+
+# Retrocede $2 hasta el inicio de un caracter en $1 (evita partir uno al cortar).
+char_start() {
+  local s="$1" pos="$2" cb
+  if [ "$BYTE_MODE" -eq 0 ]; then
+    printf '%d' "$pos"
+    return
+  fi
+  while [ "$pos" -gt 0 ]; do
+    cb="${s:$pos:1}"
+    case "$CONT_BYTES" in
+    *"$cb"*) pos=$((pos - 1)) ;;
+    *) break ;;
+    esac
+  done
+  printf '%d' "$pos"
+}
+
 usage() {
   echo "$L_USAGE_HEAD $0 $L_USAGE_OPTS"
   echo "$L_OPT_HEAD"
@@ -660,13 +724,8 @@ draw_line() {
       avail=$((target_visible - 2))
       [ "$avail" -lt 20 ] && avail=20
     fi
-    local clean
-    clean=$(strip_ansi "$cur")
-    local count_str="${clean//█/X}"
-    count_str="${count_str//░/X}"
-    count_str="${count_str//─/X}"
-    count_str="${count_str//│/X}"
-    local len=${#count_str}
+    local len
+    len=$(vis_len "$cur")
     if [ "$len" -le "$avail" ]; then
       local out="${prefix}${cur}"
       local padding=$((target_visible - len - ${#prefix}))
@@ -731,6 +790,7 @@ draw_line() {
         break
       fi
     done
+    [ "$cut_raw" -gt 0 ] && cut_raw=$(char_start "$cur" "$cut_raw")
     [ "$cut_raw" -eq 0 ] && cut_raw=$raw_len
     local chunk rest_text
     local use_space=0
@@ -772,13 +832,8 @@ draw_line() {
       chunk="${chunk}${NC}"
       rest_text="${last_code}${rest_text}"
     fi
-    local clean_c
-    clean_c=$(strip_ansi "$chunk")
-    local cc="${clean_c//█/X}"
-    cc="${cc//░/X}"
-    cc="${cc//─/X}"
-    cc="${cc//│/X}"
-    local len_c=${#cc}
+    local len_c
+    len_c=$(vis_len "$chunk")
     local out_c="${prefix}${chunk}"
     local pad_c=$((target_visible - len_c - ${#prefix}))
     [ "$pad_c" -lt 0 ] && pad_c=0
@@ -829,12 +884,8 @@ get_distro_ver() {
 
 pad_label() {  local text="$1"
   local width="$2"
-  local clean
-  clean=$(strip_ansi "$text")
-
-  local count_str="${clean//█/X}"
-  count_str="${count_str//░/X}"
-  local len=${#count_str}
+  local len
+  len=$(vis_len "$text")
 
   local pad=$((width - len))
   [ "$pad" -lt 0 ] && pad=0
@@ -889,7 +940,12 @@ render_dashboard() {
   while read -r d; do
     [ -z "$d" ] && continue
     IFS=: read -r mount perc total free <<<"$d"
-    if [ "${#mount}" -gt 25 ]; then mount="${mount:0:11}...${mount: -11}"; fi
+    if [ "$(vis_len "$mount")" -gt 25 ]; then
+      local _mh _mt
+      _mh=$(char_start "$mount" 11)
+      _mt=$(char_start "$mount" $((${#mount} - 11)))
+      mount="${mount:0:$_mh}...${mount:$_mt}"
+    fi
     draw_line "$(pad_label "$mount" 25) $(draw_bar "$perc") | T: ${total} $L_FREE ${free}"
   done <<<"$DISCOS_DATA"
   echo -e "├${H_LINE}┤"
@@ -901,7 +957,8 @@ render_dashboard() {
   while read -r s; do
     [ -z "$s" ] && continue
     IFS=: read -r name ports <<<"$s"
-    local name_vis_len=${#name}
+    local name_vis_len
+    name_vis_len=$(vis_len "$name")
     local padding_count=$((svc_name_col - name_vis_len))
     # nombre mas largo que la columna: al menos 1 espacio, nunca pegar nombre y puertos
     [ "$padding_count" -lt 1 ] && padding_count=1
@@ -971,7 +1028,7 @@ render_dashboard() {
     local v_val="${v_pair#*:}"
 
     local v_str="${VERDE}$v_name${NC}:${BLANCO}$v_val${NC}"
-    local v_len=$((${#v_name} + ${#v_val} + 1))
+    local v_len=$(( $(vis_len "$v_name") + $(vis_len "$v_val") + 1 ))
 
     if [ $((current_ver_vis + v_len + 2)) -gt $((WIDTH - 4)) ]; then
       draw_line "$current_ver_line"
