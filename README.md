@@ -3,7 +3,7 @@
 A lightweight system information script, similar to `fastfetch` or `neofetch`, designed for quick server diagnostics, no externals commands.
 
 <p align="center">
-  <img src="stats.png" alt="stats.sh dashboard screenshot" />
+  <img src="stats.png" alt="stats.sh dashboard screenshot (demo data, not a real host)" />
 </p>
 
 ## Features
@@ -102,6 +102,16 @@ Verified running clean (all output modes, ES and EN, widths 40-200) on:
 | busybox (no bash) | - | busybox | re-execs bash, otherwise exits `1` with a clear message |
 
 Older kernels without `MemAvailable` (< 3.14) fall back to `free + buffers + cached`.
+
+The matrix is reproducible:
+
+```bash
+test/compat.sh              # host + containers (CentOS 5.11/6.10, Debian slim)
+test/compat.sh --no-docker  # only the local sweep (modes, locales x widths, fallbacks)
+```
+
+It checks exit codes, JSON validity, UTF-8 integrity and box alignment, plus the
+`ip` -> `ifconfig` -> `/proc` fallback chain with the binaries hidden from `PATH`.
 
 ## Authors
 - **Cristian Gimenez** (cgimenez@gmail.com)
